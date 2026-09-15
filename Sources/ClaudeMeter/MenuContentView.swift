@@ -70,6 +70,8 @@ struct StatRow: View {
 
 struct MenuContentView: View {
     @ObservedObject var model: MeterModel
+    @State private var loginState: LoginItem.State = .disabled
+    @State private var loginError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -91,10 +93,14 @@ struct MenuContentView: View {
             }
 
             Divider()
-            footer
+            VStack(alignment: .leading, spacing: 8) {
+                loginRow
+                footer
+            }
         }
         .padding(12)
         .frame(width: 272)
+        .onAppear { loginState = LoginItem.state }
     }
 
     private var header: some View {
@@ -140,6 +146,36 @@ struct MenuContentView: View {
             StatRow(label: "直近の到達 (\(hit.kind == .fiveHour ? "5h" : "週"))",
                     value: Fmt.dateTimeShort.string(from: hit.at))
         }
+    }
+
+    /// ログイン時の自動起動トグル。要承認のときだけシステム設定への導線を出す。
+    private var loginRow: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text("ログイン時に起動").font(.system(size: 10)).foregroundStyle(.secondary)
+                Spacer()
+                if loginState == .requiresApproval {
+                    Button("設定を開く") { LoginItem.openSettings() }
+                        .font(.system(size: 9))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.orange)
+                }
+                Toggle("", isOn: Binding(get: { loginState == .enabled },
+                                         set: { setLoginItem($0) }))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .disabled(loginState == .unavailable)
+            }
+            if let loginError {
+                Text(loginError).font(.system(size: 9)).foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func setLoginItem(_ enabled: Bool) {
+        loginError = LoginItem.set(enabled)
+        loginState = LoginItem.state
     }
 
     private var footer: some View {

@@ -10,6 +10,11 @@ struct ClaudeMeterApp: App {
             DumpMode.run()
             exit(0)
         }
+        // ログイン項目の登録／解除も GUI なしで扱えるようにしておく。
+        if let i = CommandLine.arguments.firstIndex(of: "--login-item") {
+            let sub = CommandLine.arguments.count > i + 1 ? CommandLine.arguments[i + 1] : nil
+            exit(LoginItem.runCLI(sub))
+        }
     }
 
     var body: some Scene {

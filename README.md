@@ -45,7 +45,18 @@ open ~/Applications/ClaudeMeter.app
 `install-collector.py` は初回に `~/.claude/statusline.py.bak.claudemeter` へバックアップを取る。
 収集ロジックを更新したら再実行すれば差し替わる。外すのは `--uninstall`。
 
-ログイン時に自動起動するには、システム設定 → 一般 → ログイン項目に `ClaudeMeter.app` を追加する。
+### ログイン時に自動起動する
+
+メニューの「ログイン時に起動」をオンにする。GUI を開かずに切り替えるなら:
+
+```bash
+~/Applications/ClaudeMeter.app/Contents/MacOS/ClaudeMeter --login-item register    # 登録
+~/Applications/ClaudeMeter.app/Contents/MacOS/ClaudeMeter --login-item status      # 確認
+~/Applications/ClaudeMeter.app/Contents/MacOS/ClaudeMeter --login-item unregister  # 解除
+```
+
+登録されるのは**そのとき起動している `.app` のパス**なので、`.app` を移動したら登録し直す。
+macOS が承認を求める状態（`要承認`）になったら、メニューの「設定を開く」からログイン項目のペインへ飛べる。
 
 ### サンプリング密度を上げる（任意）
 
