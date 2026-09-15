@@ -56,3 +56,47 @@ SDK モジュールの再構築が走り、10 分経っても終わらなかっ�
 
 メニューバーの見た目は、こちらからは画面収録の TCC が取れず（Terminal.app も使い捨ての
 キャプチャ用 `.app` も `SCStreamErrorDomain -3801`）、2026-09-15 にユーザーの目視で確認した。
+
+## 取得経路の作り直し (2026-09-15)
+
+statusLine 相乗りは**ターミナルの Claude Code でしか動かない**ことが分かった。VSCode 拡張・
+デスクトップ・Web のセッションでは statusline.py が一度も実行されず（`~/.claude/.context-state/`
+にも `samples.jsonl` にも書かれない）、その間メニューバーは最後の値を出したままになる。
+手元では 11:19 の値が 3 時間そのままだった。
+
+代替を探した結果、`claude` の control_request に `get_usage` があった。
+
+```
+{"type":"control_request","request_id":"1","request":{"subtype":"get_usage","skip_behaviors":true}}
+```
+
+`skip_behaviors` の説明に「プラン残量だけが必要な呼び出し元、たとえば usage meter 向け」と
+書かれており、まさにこの用途。`/usage` と同じサーバー値が返る。
+
+### 決めたこと
+
+- **常駐 1 プロセスに繰り返し投げる**。1 回ごとに `claude` を起こすと、起動が毎回 1〜3 秒かかり、
+  セッションが毎回 1 つ増え、SessionStart フックまで走る。stdin を開いたままにして
+  30 秒ごとに control_request を 1 行書く形にした。
+- **`--settings '{"disableAllHooks":true}'` を渡す**。これが無いとユーザーのワークログフックが
+  ポーリングのたびに「セッション開始」を打ち、ログが汚れる。実測で混入が消えることを確認した。
+- **クォータは消費しない**。プロンプトを送らないので `total_cost_usd` は 0 のまま。
+- **statusLine の収集フックは残す**。`get_usage` は Experimental で応答形が変わりうるため、
+  取れなくなっても samples.jsonl から表示は続けられるようにしておく。両者は同じ
+  samples.jsonl に書き、probe 側の行には `"source":"probe"` を入れて区別する。
+- **`claude` はバージョンで選ぶ**。GUI から起動した `.app` の PATH には nvm も homebrew も
+  入らないので、対話シェル (`zsh -ic`) に PATH を聞いて候補を集める。ここで homebrew に
+  残っていた 1.0.100 を先に拾ってしまい `get_usage` が無反応になった。候補すべてに
+  `--version` を聞いて一番新しいものを採る形にした（手元では nvm の 2.1.272）。
+- **UI のタイマーを `.common` モードに**。既定の `.default` だと、メニューを開いて
+  トラッキングしている間だけ秒針とゲージが止まる。
+- **`start()` を冪等に**。`MenuBarExtra` の label の `.onAppear` から呼んでいるので、
+  label が作り直されるとタイマーが二重に張られていた。
+
+### 確認済み
+
+- `env -u PATH` で GUI 相当の環境を作り、nvm の 2.1.272 を選んで残量を取得（`--probe`）
+- `--dump` で 5時間 1% / 週間 39%、`取得経路 ライブ` を確認。窓リセット（14:40）を跨いで
+  39% → 1% に落ちることも実データで確認できた
+- 常駐後、`samples.jsonl` に `"source":"probe"` の行が追記されることを確認
+- ワークログに probe 由来の「セッション開始」が混じらないことを確認

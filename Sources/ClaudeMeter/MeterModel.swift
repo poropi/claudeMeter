@@ -3,37 +3,76 @@ import SwiftUI
 
 @MainActor
 final class MeterModel: ObservableObject {
+    /// サーバーへ残量を引きに行く間隔。CLAUDEMETER_POLL_SECONDS で変えられる。
+    static var pollInterval: TimeInterval {
+        let raw = ProcessInfo.processInfo.environment["CLAUDEMETER_POLL_SECONDS"]
+        return raw.flatMap(Double.init).map { max(10, $0) } ?? 30
+    }
+
     @Published private(set) var engine = LimitEngine(samples: [])
     @Published private(set) var hits: [LimitHit] = []
     @Published private(set) var now = Date()
     @Published private(set) var collectorInstalled = false
+    @Published private(set) var probeStatus: UsageProbe.Status = .starting
 
     private let scanner = LimitHitScanner()
     private var lastSamplesMtime: Date?
     private var tick: Timer?
     private var scanTick: Timer?
+    private var probe: UsageProbe?
 
-    /// このリセット時刻を過ぎたら Claude Code 側もカウンタを畳む。
-    /// サンプルが古くても「窓が変わった」ことだけは時計から判断できる。
+    /// 直近の値がいつのものか。ライブ取得が生きている間は古びない。
     var isStale: Bool {
+        if case .live(let at) = probeStatus, now.timeIntervalSince(at) < 180 { return false }
         guard let last = engine.lastSampleAt else { return true }
         return now.timeIntervalSince(last) > 120
     }
 
     func start() {
+        // MenuBarExtra の label は作り直されることがある。二重にタイマーを張らない。
+        guard tick == nil else { return }
+
         reloadSamples(force: true)
         Task { await refreshHits() }
+        startProbe()
 
-        tick = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        // .common モードで回す。メニューを開いている間も秒針とゲージを止めない。
+        let tick = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
                 self.now = Date()
                 self.reloadSamples(force: false)
             }
         }
-        scanTick = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+        RunLoop.main.add(tick, forMode: .common)
+        self.tick = tick
+
+        let scanTick = Timer(timeInterval: 300, repeats: true) { [weak self] _ in
             Task { await self?.refreshHits() }
         }
+        RunLoop.main.add(scanTick, forMode: .common)
+        self.scanTick = scanTick
+    }
+
+    /// `claude` に `get_usage` を投げて残量を直接引く。statusLine が走らない
+    /// UI（VSCode 拡張・デスクトップ）でも、Claude Code が動いていなくても取れる。
+    private func startProbe() {
+        let probe = UsageProbe(
+            interval: Self.pollInterval,
+            onReading: { [weak self] reading in
+                Task { @MainActor in self?.apply(reading) }
+            },
+            onStatus: { [weak self] status in
+                Task { @MainActor in self?.probeStatus = status }
+            }
+        )
+        probe.start()
+        self.probe = probe
+    }
+
+    private func apply(_ reading: UsageReading) {
+        guard SampleWriter.append(reading, to: Paths.samplesFile, previous: engine.samples.last) else { return }
+        reloadSamples(force: true)
     }
 
     func refreshHits() async {

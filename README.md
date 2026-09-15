@@ -16,34 +16,55 @@ Claude Code の **5時間制限**と**週間制限（7日）**の残量を、mac
 トークン量と実際のクォータ消費は比例しない（モデル・キャッシュ読み・effort で係数が違う）し、
 週間制限は扱っていない。
 
-claudeMeter はサーバーが返した実測値を使う。Claude Code は statusLine スクリプトの
-stdin JSON に `rate_limits` を渡しており、これは `/usage` が表示するものと同じ値である。
+claudeMeter はサーバーが返した実測値を使う。`claude` に control_request `get_usage` を
+投げると、`/usage` が出すのと同じ残量がそのまま返る。
 
 ```json
+{"type":"control_request","request_id":"1",
+ "request":{"subtype":"get_usage","skip_behaviors":true}}
+```
+```json
 "rate_limits": {
-  "five_hour": { "used_percentage": 23.5, "resets_at": 1738425600 },
-  "seven_day": { "used_percentage": 41.2, "resets_at": 1738857600 }
+  "five_hour": { "utilization": 23, "resets_at": "2026-09-15T05:40:00+00:00" },
+  "seven_day": { "utilization": 41, "resets_at": "2026-09-19T23:00:00+00:00" }
 }
 ```
+
+`skip_behaviors` は「プラン残量だけが必要な usage meter 向け」と説明されているオプションで、
+7 日分のトランスクリプト走査を省く。プロンプトを送らないのでクォータは消費しない
+（`total_cost_usd` は 0 のまま）。
 
 ## 構成
 
 | | |
 |---|---|
-| 収集 | `collector/claudemeter_collector.py` を `~/.claude/statusline.py` に差し込む。値が変化したときだけ `~/.claude/claudemeter/samples.jsonl` に 1 行追記する |
+| 取得 | `claude` を 1 プロセス常駐させ、30 秒ごとに control_request `get_usage` を投げる。プロンプトを送らないのでクォータは減らない |
+| 収集 (副) | `collector/claudemeter_collector.py` を `~/.claude/statusline.py` に差し込む。ターミナルで作業している間だけ動く保険 |
 | 表示 | `Sources/ClaudeMeter/` — SwiftUI `MenuBarExtra` の常駐アプリ。外部ライブラリ・常駐デーモンなし |
 | 到達履歴 | `~/.claude/projects/**/*.jsonl` に残る 429 の `quotaLimits` を走査し、実際に上限へ当たった時刻を出す。ファイルごとに走査済みオフセットを覚えるので 2 回目以降は数十 ms |
 
 ## セットアップ
 
 ```bash
-python3 scripts/install-collector.py     # ~/.claude/statusline.py に収集フックを差し込む
 bash scripts/build-app.sh                # ~/Applications/ClaudeMeter.app を作る
 open ~/Applications/ClaudeMeter.app
 ```
 
+これだけで動く。`claude` の場所は自分で探す（対話シェルの PATH → nvm の各バージョン →
+`~/.claude/local` → homebrew の順に見て、**バージョンが一番新しいもの**を選ぶ。`get_usage` に
+応えるのは 2.0 以降で、homebrew に 1.x が残っていることがあるため）。
+明示するなら `CLAUDEMETER_CLAUDE_BIN`。取得間隔は `CLAUDEMETER_POLL_SECONDS`（既定 30 秒）。
+
+### statusLine の収集フック（任意）
+
+```bash
+python3 scripts/install-collector.py     # ~/.claude/statusline.py に収集フックを差し込む
+```
+
+ターミナルで Claude Code を使っている間だけ、statusLine の stdin から同じ値を拾って
+samples.jsonl に足す。**入れなくても表示は動く**（上の常駐取得が主で、こちらは保険）。
 `install-collector.py` は初回に `~/.claude/statusline.py.bak.claudemeter` へバックアップを取る。
-収集ロジックを更新したら再実行すれば差し替わる。外すのは `--uninstall`。
+外すのは `--uninstall`。
 
 ### ログイン時に自動起動する
 
@@ -57,15 +78,6 @@ open ~/Applications/ClaudeMeter.app
 
 登録されるのは**そのとき起動している `.app` のパス**なので、`.app` を移動したら登録し直す。
 macOS が承認を求める状態（`要承認`）になったら、メニューの「設定を開く」からログイン項目のペインへ飛べる。
-
-### サンプリング密度を上げる（任意）
-
-statusLine は既定ではイベント時（各ターンなど）にしか走らない。長いツール実行中も追従させたいなら
-`~/.claude/settings.json` の `statusLine` に `refreshInterval` を足す。
-
-```json
-"statusLine": { "type": "command", "command": "python3 ~/.claude/statusline.py", "refreshInterval": 30 }
-```
 
 ## 確認
 
@@ -85,16 +97,22 @@ GUI を開かずに現在値を見る:
 バーンレート  12.0 %/h
 予測枯渇      このペースなら到達せず
 直近の到達    9/14 15:54  (5時間制限)
+取得経路      ライブ (claude get_usage)
+最終更新      14:45
+サンプル数    32
 ```
 
+`--dump` は起動時に 1 回サーバーへ取りに行くので、「今ライブで取れているか」もここで分かる。
+取得経路の切り分けは `--probe`（どの `claude` を選んだか、何が返ったか）。
 `CLAUDEMETER_DIR` で読み込み元を差し替えられる（合成データでの検証用）。
 
 ## 制約
 
-- `rate_limits` は **Claude.ai Pro / Max 契約**で、かつセッションの最初の API 応答後にのみ来る
-- **Claude Code のセッションが動いている間しかサンプリングできない。** セッション外は最後の値と
-  リセットまでのカウントダウンを表示する
-- リセット時刻を過ぎた窓は 0% として扱う（Claude Code 自身も当該キーを落とす）。
-  次の窓の開始は最初の送信時なので、リセット時刻は再取得まで分からない
+- 残量が返るのは **Claude.ai Pro / Max / Team 契約**のとき。API キー・Bedrock・Vertex では
+  `rate_limits_available` が false になり、その旨をメニューに出す
+- `get_usage` は **Experimental**（`claude` 側のコメントどおり、応答の形は変わりうる）。
+  取れなくなったら statusLine 経由の収集に落ちる
 - サーバーが返す値はおおむね整数刻みなので、バーンレートは直近 45 分で出せないときは
   窓全体の平均に落ちる
+- `claude` の常駐プロセスが 1 つ増える（アイドル。`--settings '{"disableAllHooks":true}'` を
+  渡すので、ユーザーのフックは起こさない）

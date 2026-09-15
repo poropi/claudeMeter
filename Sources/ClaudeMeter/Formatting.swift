@@ -42,6 +42,7 @@ enum Fmt {
     static let timeOnly = formatter("H:mm")
     static let dateTime = formatter("M/d(E) H:mm")
     static let dateTimeShort = formatter("M/d H:mm")
+    static let clock = formatter("H:mm:ss")
 
     /// 消費率に応じた円グリフ。メニューバーは幅が限られるので 1 文字で量を伝える。
     static func glyph(_ used: Double) -> String {

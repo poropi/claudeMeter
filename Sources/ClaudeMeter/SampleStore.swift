@@ -43,6 +43,43 @@ enum SampleReader {
     }
 }
 
+/// samples.jsonl へ 1 行追記する。収集フック (Python) と同じ形式・同じ方針で、
+/// 前回と同じ値なら書かない。30 秒おきに引いても行が増えるのは変化したときだけ。
+enum SampleWriter {
+    @discardableResult
+    static func append(_ reading: UsageReading, to url: URL, previous: Sample?) -> Bool {
+        guard !reading.isEmpty else { return false }
+        if let previous, previous.fiveHour == reading.fiveHour, previous.sevenDay == reading.sevenDay {
+            return false
+        }
+
+        var object: [String: Any] = ["ts": Int(Date().timeIntervalSince1970), "source": "probe"]
+        func put(_ kind: LimitKind, _ window: LimitWindow?) {
+            guard let window else { return }
+            var entry: [String: Any] = ["used": window.used]
+            if let resets = window.resetsAt { entry["resets_at"] = Int(resets.timeIntervalSince1970) }
+            object[kind.rawValue] = entry
+        }
+        put(.fiveHour, reading.fiveHour)
+        put(.sevenDay, reading.sevenDay)
+
+        guard var data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
+            return false
+        }
+        data.append(0x0A)
+
+        Paths.ensureMeterDir()
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            guard (try? handle.seekToEnd()) != nil, (try? handle.write(contentsOf: data)) != nil else {
+                return false
+            }
+            return true
+        }
+        return (try? data.write(to: url)) != nil
+    }
+}
+
 /// 観測系列から今の状態と傾きを出す。
 struct LimitEngine {
     var samples: [Sample]

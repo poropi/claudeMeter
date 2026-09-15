@@ -77,7 +77,7 @@ struct MenuContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
 
-            if !model.collectorInstalled {
+            if !model.collectorInstalled, case .unavailable = model.probeStatus {
                 setupNotice
             } else {
                 WindowSection(kind: .fiveHour, state: model.state(.fiveHour), now: model.now,
@@ -115,8 +115,8 @@ struct MenuContentView: View {
 
     private var setupNotice: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("収集が未設定です").font(.system(size: 11, weight: .semibold))
-            Text("statusLine スクリプトに収集フックを入れると\nここに 5時間／週間の残量が出ます。")
+            Text("残量を取得できません").font(.system(size: 11, weight: .semibold))
+            Text("claude コマンドに届かず、収集済みのデータもありません。\nターミナルで claude にログインしてから開き直してください。")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             Text(Paths.samplesFile.path)
@@ -173,6 +173,29 @@ struct MenuContentView: View {
         }
     }
 
+    /// 取得経路の状態。ライブで引けているならその時刻、駄目ならファイルの最終更新に落とす。
+    @ViewBuilder
+    private var liveStatus: some View {
+        switch model.probeStatus {
+        case .live(let at):
+            Label("ライブ \(Fmt.clock.string(from: at))", systemImage: "dot.radiowaves.left.and.right")
+                .font(.system(size: 9).monospacedDigit())
+                .foregroundStyle(.secondary)
+        case .starting:
+            Label("接続中…", systemImage: "ellipsis")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+        case .unavailable(let reason):
+            VStack(alignment: .leading, spacing: 1) {
+                Label(model.engine.lastSampleAt.map { "最終更新 \(Fmt.timeOnly.string(from: $0))" } ?? "未取得",
+                      systemImage: "moon.zzz")
+                    .font(.system(size: 9).monospacedDigit())
+                Text(reason).font(.system(size: 8))
+            }
+            .foregroundStyle(.secondary)
+        }
+    }
+
     private func setLoginItem(_ enabled: Bool) {
         loginError = LoginItem.set(enabled)
         loginState = LoginItem.state
@@ -180,15 +203,7 @@ struct MenuContentView: View {
 
     private var footer: some View {
         HStack {
-            if model.isStale {
-                Label("待機中 (Claude 未実行)", systemImage: "moon.zzz")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-            } else if let last = model.engine.lastSampleAt {
-                Text("最終更新 \(Fmt.timeOnly.string(from: last))")
-                    .font(.system(size: 9).monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
+            liveStatus
             Spacer()
             Button("終了") { NSApplication.shared.terminate(nil) }
                 .font(.system(size: 10))

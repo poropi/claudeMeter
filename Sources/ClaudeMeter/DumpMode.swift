@@ -5,6 +5,13 @@ import Foundation
 enum DumpMode {
     static func run() {
         let now = Date()
+        // まずサーバーから 1 回引く。取れたら samples.jsonl にも残るので、
+        // アプリを開かずに「今ライブで取れているか」をここで確かめられる。
+        let live = UsageProbe.fetchOnce()
+        if let live, live.available {
+            SampleWriter.append(live, to: Paths.samplesFile,
+                                previous: SampleReader.loadTail(from: Paths.samplesFile).last)
+        }
         let engine = LimitEngine(samples: SampleReader.loadTail(from: Paths.samplesFile))
         let hits = LimitHitScanner().scan()
 
@@ -12,8 +19,7 @@ enum DumpMode {
         print("")
 
         guard FileManager.default.fileExists(atPath: Paths.samplesFile.path) else {
-            print("収集が未設定です: \(Paths.samplesFile.path) がありません")
-            print("scripts/install-collector.py を実行してください")
+            print("残量を取得できません: claude コマンドに届かず、\(Paths.samplesFile.path) もありません")
             return
         }
 
@@ -49,9 +55,14 @@ enum DumpMode {
             print("直近の到達    \(Fmt.dateTimeShort.string(from: hit.at))  (\(hit.kind.label))")
         }
 
-        if let last = engine.lastSampleAt {
+        if live?.available == true {
+            print("取得経路      ライブ (claude get_usage)")
+        } else if let last = engine.lastSampleAt {
             let age = now.timeIntervalSince(last)
-            print("最終更新      \(Fmt.timeOnly.string(from: last))" + (age > 120 ? "  ※ Claude 未実行" : ""))
+            print("取得経路      ファイルのみ" + (age > 120 ? "  ※ ライブ取得に失敗" : ""))
+        }
+        if let last = engine.lastSampleAt {
+            print("最終更新      \(Fmt.timeOnly.string(from: last))")
         }
         print("サンプル数    \(engine.samples.count)")
         print("")
