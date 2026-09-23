@@ -53,6 +53,27 @@ claudeMeter はサーバーが返した実測値を使う。`claude` に control
 
 ## セットアップ
 
+### ダウンロードして使う
+
+[Releases](https://github.com/poropi/claudeMeter/releases/latest) から `ClaudeMeter-<version>-arm64.zip` を落として展開し、
+`ClaudeMeter.app` を `/Applications`（または `~/Applications`）へ移す。
+
+Apple の公証（notarization）を通していないアドホック署名のアプリなので、そのままでは
+Gatekeeper に止められる。どちらかで開けるようにする:
+
+- 一度開こうとして止められたあと、「システム設定 → プライバシーとセキュリティ」の下に出る
+  「このまま開く」を押す
+- ターミナルでダウンロード由来の隔離属性を外す
+
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/ClaudeMeter.app
+  open /Applications/ClaudeMeter.app
+  ```
+
+以降の例は `~/Applications` に置いた場合のパスで書いているので、置き場所に合わせて読み替える。
+
+### ソースからビルドする
+
 ```bash
 bash scripts/build-app.sh                # ~/Applications/ClaudeMeter.app を作る
 open ~/Applications/ClaudeMeter.app
