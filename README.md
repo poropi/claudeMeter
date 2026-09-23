@@ -4,13 +4,15 @@ Claude Code の **5時間制限**と**週間制限（7日）**の残量を、mac
 
 ```
 ┌─ menu bar ────────────────────────┐
-│  ◔23% ◑41%                        │
+│  ◔23% ◔35%                        │
 └───────────────────────────────────┘
 ```
 
 クリックすると消費率・リセットまでの残り時間・バーンレート・予測枯渇時刻・直近に上限へ到達した日時が出る。
 
-## なぜ作るか
+> 個人開発のツールで、Anthropic 公式のものではない。
+
+## なぜ作ったか
 
 `ccusage` や `claude-monitor` はローカル JSONL のトークン数から 5時間ブロックを**推定**する。
 トークン量と実際のクォータ消費は比例しない（モデル・キャッシュ読み・effort で係数が違う）し、
@@ -26,7 +28,7 @@ claudeMeter はサーバーが返した実測値を使う。`claude` に control
 ```json
 "rate_limits": {
   "five_hour": { "utilization": 23, "resets_at": "2026-09-15T05:40:00+00:00" },
-  "seven_day": { "utilization": 41, "resets_at": "2026-09-19T23:00:00+00:00" }
+  "seven_day": { "utilization": 35, "resets_at": "2026-09-19T23:00:00+00:00" }
 }
 ```
 
@@ -43,12 +45,20 @@ claudeMeter はサーバーが返した実測値を使う。`claude` に control
 | 表示 | `Sources/ClaudeMeter/` — SwiftUI `MenuBarExtra` の常駐アプリ。外部ライブラリ・常駐デーモンなし |
 | 到達履歴 | `~/.claude/projects/**/*.jsonl` に残る 429 の `quotaLimits` を走査し、実際に上限へ当たった時刻を出す。ファイルごとに走査済みオフセットを覚えるので 2 回目以降は数十 ms |
 
+## 動作環境
+
+- macOS 14 (Sonoma) 以降、**Apple Silicon**（`build-app.sh` は `arm64` 向けにだけビルドする）
+- Xcode（`xcrun swiftc` でビルドする。Command Line Tools だけの環境では未確認）
+- Claude Code 2.0 以降がインストール済みで、Claude.ai の Pro / Max / Team アカウントでログインしていること
+
 ## セットアップ
 
 ```bash
 bash scripts/build-app.sh                # ~/Applications/ClaudeMeter.app を作る
 open ~/Applications/ClaudeMeter.app
 ```
+
+置き場所を変えるなら第1引数で指定する（例: `bash scripts/build-app.sh /Applications/ClaudeMeter.app`）。
 
 これだけで動く。`claude` の場所は自分で探す（対話シェルの PATH → nvm の各バージョン →
 `~/.claude/local` → homebrew の順に見て、**バージョンが一番新しいもの**を選ぶ。`get_usage` に
@@ -88,6 +98,8 @@ GUI を開かずに現在値を見る:
 ```
 
 ```
+claudeMeter  9/15 10:46
+
 5時間制限  █████░░░░░░░░░░░░░░░  23%
   リセットまで 3:54  (14:40)
 
@@ -98,8 +110,10 @@ GUI を開かずに現在値を見る:
 予測枯渇      このペースなら到達せず
 直近の到達    9/14 15:54  (5時間制限)
 取得経路      ライブ (claude get_usage)
-最終更新      14:45
+最終更新      10:46
 サンプル数    32
+
+メニューバー表示:  ◔23% ◔35%
 ```
 
 `--dump` は起動時に 1 回サーバーへ取りに行くので、「今ライブで取れているか」もここで分かる。
@@ -116,3 +130,17 @@ GUI を開かずに現在値を見る:
   窓全体の平均に落ちる
 - `claude` の常駐プロセスが 1 つ増える（アイドル。`--settings '{"disableAllHooks":true}'` を
   渡すので、ユーザーのフックは起こさない）
+
+## アンインストール
+
+```bash
+~/Applications/ClaudeMeter.app/Contents/MacOS/ClaudeMeter --login-item unregister   # 自動起動を解除
+python3 scripts/install-collector.py --uninstall   # statusLine の収集フックを入れた場合だけ
+rm -rf ~/Applications/ClaudeMeter.app ~/.claude/claudemeter
+```
+
+`~/.claude/claudemeter` には取得したサンプル（`samples.jsonl`）と到達履歴のキャッシュが入っている。
+
+## ライセンス
+
+[MIT](LICENSE)
